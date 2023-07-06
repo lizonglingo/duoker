@@ -13,7 +13,10 @@ func main() {
 	case "run":
 		// 在一个新的命名空间
 		fmt.Println("run pid ", os.Getpid(), "ppid", os.Getppid())
+		// 这里拿到的 initCmd 就是 duoker 进程连接
+		// 在后面还要执行一次 使用 init 命令
 		initCmd, err := os.Readlink("/proc/self/exe")
+		fmt.Println("initCmd symbolic link: ", initCmd)
 		if err != nil {
 			fmt.Println("get init process error ", err)
 			return
@@ -33,10 +36,14 @@ func main() {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+
+		// cmd.Run()	启动子进程等待结束
+		// cmd.Start()	不等待子进程结束
 		err = cmd.Run()
 		if err != nil {
 			fmt.Println("cmd run error:", err)
 		}
+		fmt.Println("Bye!")
 		return
 	case "init":
 		pwd, err := os.Getwd()
@@ -45,6 +52,7 @@ func main() {
 			return
 		}
 		path := pwd + "/ubuntu-base-22.04-base-amd64"
+		fmt.Println("init path is ", pwd)
 		// systemd 为init进程时，挂载默认是共享模式挂载的，共享模式挂载会让所有命名空间都能看到各自的挂载的目录
 		// 后续调用pivot root会失败，所以将命名空间声明为私有的，MS_REC是mount选项中的一个标志，用于递归地挂载一个目录及其所有子目录
 		syscall.Mount("", "/", "", syscall.MS_PRIVATE|syscall.MS_REC, "")
@@ -80,5 +88,4 @@ func main() {
 	default:
 		fmt.Println("not valid cmd")
 	}
-
 }
