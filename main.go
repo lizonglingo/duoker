@@ -1,84 +1,83 @@
 package main
 
 import (
+	"duoker/workspace"
 	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
 )
 
+// ./duoker run containerName /bin/sh
+
 func main() {
 
 	switch os.Args[1] {
 	case "run":
-		// 在一个新的命名空间
+		// 打印本进程的 Pid
 		fmt.Println("run pid ", os.Getpid(), "ppid", os.Getppid())
 		// 这里拿到的 initCmd 就是 duoker 进程连接
-		// 在后面还要执行一次 使用 init 命令
+		// 在后面还要执行一次我们编译好的这个 duoker 程序
 		initCmd, err := os.Readlink("/proc/self/exe")
 		fmt.Println("initCmd symbolic link: ", initCmd)
 		if err != nil {
 			fmt.Println("get init process error ", err)
 			return
 		}
+
+		// 我们需要获取容器名 根据容器名（唯一） 去创建其对应的 overlay 联合文件系统
+		// 保证镜像只读层的特性
+		containerName := os.Args[2]
+
+		// 重写第一个参数 run -> init 可以执行到 case "init" 中
 		os.Args[1] = "init"
 		cmd := exec.Command(initCmd, os.Args[1:]...)
+		// 启动一个新的命名空间 并进行配置
 		// syscall.CLONE_NEWUTS	对主机名进行隔离
 		// syscall.CLONE_NEWPID	对pid空间进行隔离
 		// syscall.CLONE_NEWNS	对mount命名空间进行隔离
 		// syscall.CLONE_NEWNET	对网络进行隔离
-		// syscall.CLONE_NEWIPC	对进程通信组件进行隔离，我认为主要是针对消息队列
+		// syscall.CLONE_NEWIPC	对进程通信组件进行隔离（消息队列）
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS |
 				syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
 		}
-		cmd.Env = os.Environ()
+		cmd.Env = os.Environ() // 获取当前的环境变量
+		// 设置标准输入输出
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		// cmd.Run()	启动子进程等待结束
-		// cmd.Start()	不等待子进程结束
+		// cmd.Run()	会等待命令结束
+		// cmd.Start()	不会等待命令结束
 		err = cmd.Run()
 		if err != nil {
 			fmt.Println("cmd run error:", err)
 		}
+
+		// 运行结束后清理挂载命名空间 并删除对应文件夹
+		err = workspace.DelMntNamespace(containerName)
+		if err != nil {
+			fmt.Println("clean overlayfs and related dir error:", err)
+		}
 		fmt.Println("Bye!")
 		return
 	case "init":
-		pwd, err := os.Getwd()
-		if err != nil {
-			fmt.Println("pwd", err)
+		var (
+			containerName = os.Args[2]
+			cmd           = os.Args[3]
+		)
+		// 为容器配置 overlayfs 和相关的目录
+		if err := workspace.SetMountNamespace(containerName); err != nil {
+			fmt.Println(err)
 			return
 		}
-		path := pwd + "/ubuntu-base-22.04-base-amd64"
-		fmt.Println("init path is ", pwd)
-		// systemd 为init进程时，挂载默认是共享模式挂载的，共享模式挂载会让所有命名空间都能看到各自的挂载的目录
-		// 后续调用pivot root会失败，所以将命名空间声明为私有的，MS_REC是mount选项中的一个标志，用于递归地挂载一个目录及其所有子目录
-		syscall.Mount("", "/", "", syscall.MS_PRIVATE|syscall.MS_REC, "")
-		//syscall.Chroot("./ubuntu-base-16.04.6-base-amd64")
-
-		if err := syscall.Mount(path, path, "bind", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
-			fmt.Println("Mount", err)
-			return
-		}
-		if err := os.MkdirAll(path+"/.old", 0700); err != nil {
-			fmt.Println("mkdir", err)
-			return
-		}
-		err = syscall.PivotRoot(path, path+"/.old")
-		if err != nil {
-			fmt.Println("pivot root ", err)
-			return
-		}
+		// 执行 pivot_root 需要手动切到新的根路径
 		syscall.Chdir("/")
-
+		// 挂载 /proc 使其可以获得 pid 信息
 		defaultMountFlags := syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV
 		syscall.Mount("proc", "/proc", "proc", uintptr(defaultMountFlags), "")
-
-		cmd := os.Args[2]
-		fmt.Println("will exec cmd=", cmd)
-		err = syscall.Exec(cmd, os.Args[2:], os.Environ())
+		err := syscall.Exec(cmd, os.Args[3:], os.Environ())
 		if err != nil {
 			fmt.Println("exec proc fail ", err)
 			return
