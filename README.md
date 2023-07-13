@@ -85,16 +85,6 @@ git log
 git push origin dev
 ```
 
-# 容器命名空间
-
-纸上得来终觉浅，我们都能说出容器的底层技术是依赖 namespace，cgroup，union fs 等等，如果不动手用用 Linux 的这些能力，感觉还是
-一知半解的。
-
-## Namespace
-
-Namespace 主要用于进程隔离，所隔离的信息包括主机名、进程Pid空间、mount命名空间、网络等。
-
-这里着重实践一下 mount [命名空间的隔离](https://mp.weixin.qq.com/s?__biz=MzU3NjY5MjY2Ng==&mid=2247486468&idx=1&sn=5e2e537115146348d7bc137ddf4a31ff&chksm=fd1144d1ca66cdc771294afd20f6324c9c49214042362aa622e5809c0c8f9f834aeca4a50bcb&scene=178&cur_album_id=2810774774825123840#rd)
 
 
 
